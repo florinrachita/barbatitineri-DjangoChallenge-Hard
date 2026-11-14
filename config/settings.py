@@ -10,7 +10,10 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
+import os
 from pathlib import Path
+
+from django.core.management.utils import get_random_secret_key
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -20,12 +23,13 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-stcw0g@g1e5$s2g2e9sj5hdo^8rt(@5^-p0kjyp26nc*j_8otv'
+# Set DJANGO_SECRET_KEY in the environment; a random key is used for local dev otherwise.
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY') or get_random_secret_key()
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get('DJANGO_DEBUG', '1') == '1'
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['localhost', '127.0.0.1']
 
 
 # Application definition
@@ -37,6 +41,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'army',
 ]
 
 MIDDLEWARE = [
@@ -125,3 +130,10 @@ MAILERS = {
         'BACKEND': 'django.core.mail.backends.console.EmailBackend',
     },
 }
+
+# Challenge API host (no trailing slash).
+CHALLENGE_HOST = os.environ.get(
+    'CHALLENGE_HOST',
+    'https://coderun2026-csbwf4haa4d0gubu.westus3-01.azurewebsites.net',
+)
+CHALLENGE_TIMEOUT = 15  # seconds per HTTP request
