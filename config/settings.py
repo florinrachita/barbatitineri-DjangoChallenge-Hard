@@ -81,6 +81,8 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
+        # Draft tasks write from several threads: wait for locks instead of failing.
+        'OPTIONS': {'timeout': 20, 'transaction_mode': 'IMMEDIATE'},
     }
 }
 
@@ -137,3 +139,28 @@ CHALLENGE_HOST = os.environ.get(
     'https://coderun2026-csbwf4haa4d0gubu.westus3-01.azurewebsites.net',
 )
 CHALLENGE_TIMEOUT = 15  # seconds per HTTP request
+CHALLENGE_DRAFT_TIMEOUT = 180  # /draft/<n> is slow, especially under parallel load
+DRAFT_BATCH_SIZE = 10  # people per /draft/<n> batch, as observed
+DRAFT_MAX_ATTEMPTS = 3  # retries on timeouts / 5xx
+
+# Each draft batch runs as its own task; the thread pool runs them in parallel.
+TASKS = {
+    'default': {
+        'BACKEND': 'army.task_backends.ThreadPoolBackend',
+        'OPTIONS': {'MAX_WORKERS': 16},
+    },
+}
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'simple': {'format': '%(asctime)s %(levelname)s [%(threadName)s] %(name)s: %(message)s'},
+    },
+    'handlers': {
+        'console': {'class': 'logging.StreamHandler', 'formatter': 'simple'},
+    },
+    'loggers': {
+        'army': {'handlers': ['console'], 'level': 'INFO'},
+    },
+}

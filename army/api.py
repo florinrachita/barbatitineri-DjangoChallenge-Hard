@@ -1,6 +1,7 @@
 """Small HTTP client for the challenge host."""
 
 import logging
+import time
 from urllib.parse import urljoin
 
 import requests
@@ -8,32 +9,54 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
+CONNECT_TIMEOUT = 10  # seconds
+
 
 class ChallengeAPIError(Exception):
-    pass
+    def __init__(self, message, retryable=False):
+        super().__init__(message)
+        self.retryable = retryable
 
 
 def build_url(path):
     return urljoin(settings.CHALLENGE_HOST.rstrip("/") + "/", path.lstrip("/"))
 
 
-def get_json(path_or_url):
-    """GET a path (or absolute URL) on the challenge host and return decoded JSON."""
+def get_json(path_or_url, timeout=None):
+    """GET a path (or absolute URL) on the challenge host and return decoded JSON.
+
+    Raises ChallengeAPIError; `retryable` is True for timeouts, connection errors and 5xx.
+    """
     url = path_or_url if path_or_url.startswith("http") else build_url(path_or_url)
+    read_timeout = timeout or settings.CHALLENGE_TIMEOUT
+    started = time.monotonic()
     try:
-        response = requests.get(url, timeout=settings.CHALLENGE_TIMEOUT)
-        response.raise_for_status()
-        return response.json()
+        response = requests.get(url, timeout=(CONNECT_TIMEOUT, read_timeout))
     except requests.Timeout as exc:
-        raise ChallengeAPIError(f"Timed out fetching {url}") from exc
-    except requests.HTTPError as exc:
-        raise ChallengeAPIError(
-            f"HTTP {exc.response.status_code} from {url}: {exc.response.text[:200]}"
-        ) from exc
+        raise ChallengeAPIError(f"Timed out after {read_timeout}s: {url}", retryable=True) from exc
+    except requests.ConnectionError as exc:
+        raise ChallengeAPIError(f"Connection error for {url}: {exc}", retryable=True) from exc
     except requests.RequestException as exc:
         raise ChallengeAPIError(f"Request to {url} failed: {exc}") from exc
+
+    logger.info("GET %s -> HTTP %s in %.1fs", url, response.status_code, time.monotonic() - started)
+    if response.status_code >= 400:
+        raise ChallengeAPIError(
+            f"HTTP {response.status_code} from {url}: {response.text[:200]}",
+            retryable=response.status_code >= 500,
+        )
+    try:
+        payload = response.json()
     except ValueError as exc:
-        raise ChallengeAPIError(f"Invalid JSON from {url}") from exc
+        raise ChallengeAPIError(f"Invalid JSON from {url}", retryable=True) from exc
+
+    # The API also reports errors in the body, e.g. {"data": {...}, "status": 400} with HTTP 200.
+    status = payload.get("status") if isinstance(payload, dict) else None
+    if isinstance(status, int) and status >= 400:
+        raise ChallengeAPIError(
+            f"API status {status} from {url}: {payload.get('data')}", retryable=status >= 500
+        )
+    return payload
 
 
 def fetch_people():
@@ -49,3 +72,11 @@ def fetch_people():
         url = payload.get("next")
     logger.info("Fetched %d people", len(people))
     return people
+
+
+def fetch_draft_batch(number):
+    """Return the /draft/<number> payload: {"data": [...people with rank...], "next_batch": int|None}."""
+    payload = get_json(f"draft/{number}", timeout=settings.CHALLENGE_DRAFT_TIMEOUT)
+    if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+        raise ChallengeAPIError(f"Unexpected /draft/{number} payload: {str(payload)[:200]}")
+    return payload
