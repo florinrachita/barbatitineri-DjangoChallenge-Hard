@@ -55,6 +55,7 @@ class DraftBatch(models.Model):
     error = models.TextField(blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)  # last progress, for stale detection
 
     objects = DraftBatchQuerySet.as_manager()
 

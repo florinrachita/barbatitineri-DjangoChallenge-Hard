@@ -1,11 +1,12 @@
 import time
 from collections import Counter
 
+from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.tasks import TaskResultStatus
 
 from army.models import DraftBatch, Person
-from army.tasks import draft_all
+from army.tasks import DraftingInProgress, start_drafting
 
 POLL_SECONDS = 1
 
@@ -18,26 +19,34 @@ class Command(BaseCommand):
             "--batch", type=int, action="append", dest="batches",
             help="Only (re)draft this batch number. Repeat for several batches.",
         )
-        parser.add_argument("--timeout", type=int, default=900, help="Give up waiting after N seconds.")
+        parser.add_argument("--timeout", type=int, default=1800, help="Give up waiting after N seconds.")
 
     def handle(self, *args, **options):
         started = time.monotonic()
         deadline = started + options["timeout"]
 
-        result = draft_all.enqueue(batch_numbers=options["batches"])
-        self.stdout.write(f"Enqueued draft_all task {result.id}")
+        try:
+            result = start_drafting(options["batches"])
+        except DraftingInProgress as exc:
+            raise CommandError(f"{exc} Wait for them to finish, or for them to be marked interrupted.")
+        self.stdout.write(f"Enqueued draft_all task {result.id} (TASKS_MODE={settings.TASKS_MODE})")
+        if settings.TASKS_MODE == "database":
+            self.stdout.write("Tasks run in worker processes: start them with `manage.py run_workers`.")
+
         self.wait_for_task(result, deadline)
-        self.stdout.write(f"Scheduled batches: {result.return_value}")
+        numbers = result.return_value
+        self.stdout.write(f"Enqueued batches: {numbers}")
         # A full run starts from a clean table and may discover extra batches via next_batch.
         batches = DraftBatch.objects.all()
         if options["batches"] is not None:
-            batches = batches.filter(number__in=result.return_value)
+            batches = batches.filter(number__in=numbers)
         self.wait_for_batches(batches, deadline)
 
         self.print_report(time.monotonic() - started)
-        failed = batches.filter(status=DraftBatch.Status.FAILED).count()
+        failed = list(batches.filter(status=DraftBatch.Status.FAILED).values_list("number", flat=True))
         if failed:
-            raise CommandError(f"{failed} batch(es) failed; re-run them with --batch N.")
+            retry = " ".join(f"--batch {number}" for number in failed)
+            raise CommandError(f"Batches {failed} failed. Retry with: manage.py draft_people {retry}")
 
     def wait_for_task(self, result, deadline):
         while not result.is_finished:

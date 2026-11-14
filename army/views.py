@@ -4,19 +4,24 @@ from django.shortcuts import redirect, render
 
 from .forms import DraftForm
 from .models import DraftBatch, Person
-from .tasks import draft_all
+from .tasks import DraftingInProgress, mark_interrupted_batches, start_drafting
 
 
 def index(request):
     """Army overview: draft batches, rank totals, soldiers, and a form to start drafting."""
+    mark_interrupted_batches()
     if request.method == "POST":
         form = DraftForm(request.POST)
         if form.is_valid():
             batches = form.cleaned_data["batches"]
-            result = draft_all.enqueue(batch_numbers=batches)
-            which = "all batches" if batches is None else f"batches {batches}"
-            messages.success(request, f"Drafting started for {which} (task {result.id}).")
-            return redirect("army:index")
+            try:
+                result = start_drafting(batches)
+            except DraftingInProgress as exc:
+                form.add_error(None, str(exc))
+            else:
+                which = "all batches" if batches is None else f"batches {batches}"
+                messages.success(request, f"Drafting started for {which} (task {result.id}).")
+                return redirect("army:index")
     else:
         form = DraftForm()
 
