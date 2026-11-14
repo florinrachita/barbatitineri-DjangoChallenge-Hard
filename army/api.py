@@ -83,9 +83,9 @@ def fetch_people():
     return people
 
 
-def fetch_draft_batch(number):
-    """Return the /draft/<number> payload: {"data": [...people with rank...], "next_batch": int|None}."""
-    payload = get_json(f"draft/{number}", timeout=settings.CHALLENGE_DRAFT_TIMEOUT)
+def fetch_batch(path, number):
+    """Return a <host>/<path>/<number> payload: {"data": [...], "next_batch": int | None}."""
+    payload = get_json(f"{path}/{number}", timeout=settings.CHALLENGE_BATCH_TIMEOUT)
     if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
-        raise ChallengeAPIError(f"Unexpected /draft/{number} payload: {str(payload)[:200]}")
+        raise ChallengeAPIError(f"Unexpected /{path}/{number} payload: {str(payload)[:200]}")
     return payload

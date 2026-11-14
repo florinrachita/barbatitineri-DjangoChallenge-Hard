@@ -83,8 +83,11 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
-        # Draft tasks write from several threads: wait for locks instead of failing.
+        # Tasks write from several threads/processes: take the write lock at the start of each
+        # transaction and wait for it instead of failing.
         'OPTIONS': {'timeout': 20, 'transaction_mode': 'IMMEDIATE'},
+        # A file (not in-memory) test DB, so concurrency tests use real locking across threads.
+        'TEST': {'NAME': BASE_DIR / 'test_db.sqlite3'},
     }
 }
 
@@ -141,17 +144,19 @@ CHALLENGE_HOST = os.environ.get(
     'https://coderun2026-csbwf4haa4d0gubu.westus3-01.azurewebsites.net',
 )
 CHALLENGE_TIMEOUT = 60  # seconds per HTTP request (the host is slow under load)
-# /draft/<n> is slow: the server appears to handle one draft request at a time (~25-35s each,
-# shared with other clients), and Azure's front end cuts requests off after ~240s with 504/499.
-# Those gateway errors are retried; the client timeout only guards against hung connections.
-CHALLENGE_DRAFT_TIMEOUT = 300
+# Batch endpoints (/draft/<n>, /fight/<n>) are slow: the server appears to handle one request
+# at a time (shared with other clients), and Azure's front end cuts requests off after ~240s
+# with 504/499. Those gateway errors are retried; the timeout only guards against hung connections.
+CHALLENGE_BATCH_TIMEOUT = 300
+BATCH_MAX_ATTEMPTS = 5
+BATCH_RETRY_DELAY = 5  # seconds, doubled per attempt, plus jitter
 DRAFT_BATCH_SIZE = 10  # people per /draft/<n> batch, as observed
-DRAFT_MAX_ATTEMPTS = 5
-DRAFT_RETRY_DELAY = 5  # seconds, doubled per attempt, plus jitter
-# Active batches with no progress for this long count as interrupted (process stopped).
-DRAFT_STALE_AFTER = CHALLENGE_DRAFT_TIMEOUT + 120
+FIGHT_BATCH_COUNT = 10  # /fight/0 to /fight/9 (30 fights each), as observed; next_batch is still followed
+# Active batches/fights with no progress for this long count as interrupted (process stopped).
+TASK_STALE_AFTER = CHALLENGE_BATCH_TIMEOUT + 120
 
-# Each draft batch runs as its own task. Pick how tasks are executed with TASKS_MODE:
+# Every batch download and every fight simulation runs as its own task.
+# Pick how tasks are executed with TASKS_MODE:
 #   threads  (default) in-process thread pool; nothing else to run, lost on restart.
 #   database durable queue in the database; run workers with `manage.py run_workers`.
 TASK_BACKENDS = {
