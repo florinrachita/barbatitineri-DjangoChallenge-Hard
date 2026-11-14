@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{% block title %}General Deadlock's Army{% endblock %}</title>
+  {% if running %}<meta http-equiv="refresh" content="3">{% endif %}
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 72rem; }
+    nav a { margin-right: 1rem; }
+    table { border-collapse: collapse; margin-bottom: 2rem; }
+    th, td { border: 1px solid #ccc; padding: .3rem .6rem; text-align: left; vertical-align: top; }
+    td.num { text-align: right; }
+    .done, .ok { color: green; } .failed, .bad { color: #b00; } .running, .pending { color: #a60; } .new { color: #777; }
+    .blue { color: #1a56c4; } .red { color: #c41a1a; }
+    .messages { background: #eef; padding: .5rem 1rem; }
+    form { margin-bottom: 1rem; }
+    details table { margin: .5rem 0; }
+  </style>
+</head>
+<body>
+  <nav><a href="{% url 'army:index' %}">Army &amp; drafting</a><a href="{% url 'army:simulate' %}">Fight simulation</a><a href="{% url 'admin:index' %}">Admin</a></nav>
+  <h1>{% block heading %}General Deadlock's Army{% endblock %}</h1>
+  {% if messages %}
+    <ul class="messages">{% for message in messages %}<li>{{ message }}</li>{% endfor %}</ul>
+  {% endif %}
+  {% if running %}<p class="running">Background tasks are running; this page refreshes automatically.</p>{% endif %}
+  {% block content %}{% endblock %}
+</body>
+</html>

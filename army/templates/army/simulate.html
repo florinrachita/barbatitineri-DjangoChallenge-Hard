@@ -1,0 +1,84 @@
+{% extends "army/base.html" %}
+
+{% block title %}Fight simulation{% endblock %}
+{% block heading %}Fight simulation{% endblock %}
+
+{% block content %}
+  <h2>1. Fight data</h2>
+  <form method="post">
+    {% csrf_token %}
+    {{ download_form.as_div }}
+    <button type="submit" name="action" value="download">Download fights</button>
+  </form>
+  <p>{{ fights|length }} fights with {{ event_count }} events stored.</p>
+  {% include "army/_batches.html" with batches=fight_batches %}
+
+  <h2>2. Simulation</h2>
+  <form method="post">
+    {% csrf_token %}
+    {{ simulation_form.non_field_errors }}
+    <button type="submit" name="action" value="simulate">Replay all fights</button>
+    Resets every soldier to their drafted health, then replays each fight as its own background task, in parallel.
+  </form>
+  <p>{% for label, total in status_counts %}{{ label }}: {{ total }}{% if not forloop.last %} · {% endif %}{% endfor %}</p>
+
+  {% if simulated %}
+    {% if mismatches %}
+      <p class="bad"><strong>Health check failed</strong> for {{ mismatches|length }} soldiers (lost updates):
+        {% for soldier, expected in mismatches %}{{ soldier.name }} has {{ soldier.health }}, expected {{ expected }}{% if not forloop.last %}; {% endif %}{% endfor %}
+      </p>
+    {% else %}
+      <p class="ok"><strong>Health check OK:</strong> every soldier's health equals drafted health minus all damage taken (floored at 0), so no concurrent update was lost.</p>
+    {% endif %}
+  {% endif %}
+
+  <h2>Fight results</h2>
+  <table>
+    <tr><th>Fight</th><th>Blue</th><th>Red</th><th>Damage taken (blue / red)</th><th>Winner</th><th>Status</th><th>Events</th></tr>
+    {% for fight in fights %}
+      <tr>
+        <td class="num">{{ fight.external_id }}</td>
+        <td class="blue">{{ fight.blue.name }} <small>#{{ fight.blue.external_id }}, {{ fight.blue.rank }}</small></td>
+        <td class="red">{{ fight.red.name }} <small>#{{ fight.red.external_id }}, {{ fight.red.rank }}</small></td>
+        <td class="num">{% if fight.status == "done" %}{{ fight.blue_damage_taken }} / {{ fight.red_damage_taken }}{% endif %}</td>
+        <td>{% if fight.status == "done" %}{% if fight.winner %}<span class="{% if fight.winner_id == fight.blue_id %}blue{% else %}red{% endif %}">{{ fight.winner.name }}</span>{% else %}Draw{% endif %}{% endif %}</td>
+        <td class="{{ fight.status }}">{{ fight.get_status_display }}{% if fight.error %}: {{ fight.error }}{% endif %}</td>
+        <td>
+          <details>
+            <summary>{{ fight.events.all|length }} events</summary>
+            <table>
+              <tr><th>#</th><th>Attacker</th><th>Defender</th><th>Damage</th><th>Defender health after</th></tr>
+              {% for event in fight.events.all %}
+                <tr>
+                  <td class="num">{{ event.order }}</td>
+                  <td>{{ event.attacker.name }}</td>
+                  <td>{{ event.defender.name }}</td>
+                  <td class="num">{{ event.damage }}</td>
+                  <td class="num">{{ event.defender_health_after|default_if_none:"-" }}</td>
+                </tr>
+              {% endfor %}
+            </table>
+          </details>
+        </td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="7">No fights yet. Download them above, or run <code>python manage.py import_fights</code>.</td></tr>
+    {% endfor %}
+  </table>
+
+  <h2>Soldiers after the fights</h2>
+  <table>
+    <tr><th>ID</th><th>Name</th><th>Rank</th><th>Drafted health</th><th>Health now</th><th>Fights</th><th>Wins</th></tr>
+    {% for soldier in soldiers %}
+      <tr>
+        <td class="num">{{ soldier.external_id }}</td>
+        <td>{{ soldier.name }}</td>
+        <td>{{ soldier.rank }}</td>
+        <td class="num">{{ soldier.drafted_health }}</td>
+        <td class="num {% if soldier.health == 0 %}bad{% endif %}">{{ soldier.health }}</td>
+        <td class="num">{{ soldier.fights }}</td>
+        <td class="num">{{ soldier.wins }}</td>
+      </tr>
+    {% endfor %}
+  </table>
+{% endblock %}

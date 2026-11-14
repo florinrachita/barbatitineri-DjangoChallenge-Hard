@@ -1,0 +1,18 @@
+{% if batches %}
+  <table>
+    <tr><th>#</th><th>Status</th><th>Attempts</th><th>Items</th><th>Next</th><th>Seconds</th><th>Error</th></tr>
+    {% for batch in batches %}
+      <tr>
+        <td class="num">{{ batch.number }}</td>
+        <td class="{{ batch.status }}">{{ batch.get_status_display }}</td>
+        <td class="num">{{ batch.attempts }}</td>
+        <td class="num">{{ batch.item_count }}</td>
+        <td class="num">{{ batch.next_batch|default_if_none:"-" }}</td>
+        <td class="num">{{ batch.duration_seconds|default_if_none:"" }}</td>
+        <td>{{ batch.error }}</td>
+      </tr>
+    {% endfor %}
+  </table>
+{% else %}
+  <p>Nothing downloaded yet.</p>
+{% endif %}

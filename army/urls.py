@@ -6,4 +6,5 @@ app_name = "army"
 
 urlpatterns = [
     path("", views.index, name="index"),
+    path("simulate", views.simulate, name="simulate"),
 ]
