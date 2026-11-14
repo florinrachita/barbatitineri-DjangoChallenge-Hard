@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>General Deadlock's Army</title>
+  {% if drafting %}<meta http-equiv="refresh" content="3">{% endif %}
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 60rem; }
+    table { border-collapse: collapse; margin-bottom: 2rem; }
+    th, td { border: 1px solid #ccc; padding: .3rem .6rem; text-align: left; }
+    .done { color: green; } .failed { color: #b00; } .running, .pending { color: #a60; }
+    .messages { background: #eef; padding: .5rem 1rem; }
+  </style>
+</head>
+<body>
+  <h1>General Deadlock's Army</h1>
+
+  {% if messages %}
+    <ul class="messages">{% for message in messages %}<li>{{ message }}</li>{% endfor %}</ul>
+  {% endif %}
+
+  <h2>Draft</h2>
+  <form method="post">
+    {% csrf_token %}
+    {{ form.as_div }}
+    <button type="submit">Start drafting</button>
+  </form>
+  {% if drafting %}<p>Drafting in progress, this page refreshes automatically.</p>{% endif %}
+
+  <h2>Batches</h2>
+  {% if batches %}
+    <table>
+      <tr><th>#</th><th>Status</th><th>Attempts</th><th>Drafted</th><th>Next</th><th>Seconds</th><th>Error</th></tr>
+      {% for batch in batches %}
+        <tr>
+          <td>{{ batch.number }}</td>
+          <td class="{{ batch.status }}">{{ batch.get_status_display }}</td>
+          <td>{{ batch.attempts }}</td>
+          <td>{{ batch.drafted_count }}</td>
+          <td>{{ batch.next_batch|default_if_none:"-" }}</td>
+          <td>{{ batch.duration_seconds|default_if_none:"" }}</td>
+          <td>{{ batch.error }}</td>
+        </tr>
+      {% endfor %}
+    </table>
+  {% else %}
+    <p>No drafting has run yet.</p>
+  {% endif %}
+
+  <h2>Soldiers ({{ drafted_count }} of {{ people|length }} drafted)</h2>
+  {% if rank_counts %}
+    <p>{% for row in rank_counts %}{{ row.rank }}: {{ row.total }}{% if not forloop.last %} · {% endif %}{% endfor %}</p>
+  {% endif %}
+  <table>
+    <tr><th>ID</th><th>Name</th><th>Age</th><th>Rank</th><th>Health</th></tr>
+    {% for person in people %}
+      <tr>
+        <td>{{ person.external_id }}</td>
+        <td>{{ person.name }}</td>
+        <td>{{ person.age }}</td>
+        <td>{{ person.get_rank_display|default:"-" }}</td>
+        <td>{{ person.health|default_if_none:"-" }}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="5">Nobody registered yet. Run <code>python manage.py import_people</code>.</td></tr>
+    {% endfor %}
+  </table>
+</body>
+</html>
