@@ -18,6 +18,14 @@ class ChallengeAPIError(Exception):
         self.retryable = retryable
 
 
+# Azure's front end answers 504 or 499 when the app takes longer than ~240s.
+RETRYABLE_STATUSES = {408, 425, 429, 499}
+
+
+def is_retryable_status(status_code):
+    return status_code >= 500 or status_code in RETRYABLE_STATUSES
+
+
 def build_url(path):
     return urljoin(settings.CHALLENGE_HOST.rstrip("/") + "/", path.lstrip("/"))
 
@@ -25,7 +33,8 @@ def build_url(path):
 def get_json(path_or_url, timeout=None):
     """GET a path (or absolute URL) on the challenge host and return decoded JSON.
 
-    Raises ChallengeAPIError; `retryable` is True for timeouts, connection errors and 5xx.
+    Raises ChallengeAPIError; `retryable` is True for timeouts, connection errors, 5xx
+    and gateway/rate-limit statuses.
     """
     url = path_or_url if path_or_url.startswith("http") else build_url(path_or_url)
     read_timeout = timeout or settings.CHALLENGE_TIMEOUT
@@ -43,7 +52,7 @@ def get_json(path_or_url, timeout=None):
     if response.status_code >= 400:
         raise ChallengeAPIError(
             f"HTTP {response.status_code} from {url}: {response.text[:200]}",
-            retryable=response.status_code >= 500,
+            retryable=is_retryable_status(response.status_code),
         )
     try:
         payload = response.json()
@@ -54,7 +63,7 @@ def get_json(path_or_url, timeout=None):
     status = payload.get("status") if isinstance(payload, dict) else None
     if isinstance(status, int) and status >= 400:
         raise ChallengeAPIError(
-            f"API status {status} from {url}: {payload.get('data')}", retryable=status >= 500
+            f"API status {status} from {url}: {payload.get('data')}", retryable=is_retryable_status(status)
         )
     return payload
 

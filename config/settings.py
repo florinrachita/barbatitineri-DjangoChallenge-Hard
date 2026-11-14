@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 import os
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
 from django.core.management.utils import get_random_secret_key
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -41,6 +42,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django_tasks_db',
     'army',
 ]
 
@@ -138,24 +140,37 @@ CHALLENGE_HOST = os.environ.get(
     'CHALLENGE_HOST',
     'https://coderun2026-csbwf4haa4d0gubu.westus3-01.azurewebsites.net',
 )
-CHALLENGE_TIMEOUT = 15  # seconds per HTTP request
-CHALLENGE_DRAFT_TIMEOUT = 180  # /draft/<n> is slow, especially under parallel load
+CHALLENGE_TIMEOUT = 60  # seconds per HTTP request (the host is slow under load)
+# /draft/<n> is slow: the server appears to handle one draft request at a time (~25-35s each,
+# shared with other clients), and Azure's front end cuts requests off after ~240s with 504/499.
+# Those gateway errors are retried; the client timeout only guards against hung connections.
+CHALLENGE_DRAFT_TIMEOUT = 300
 DRAFT_BATCH_SIZE = 10  # people per /draft/<n> batch, as observed
-DRAFT_MAX_ATTEMPTS = 3  # retries on timeouts / 5xx
+DRAFT_MAX_ATTEMPTS = 5
+DRAFT_RETRY_DELAY = 5  # seconds, doubled per attempt, plus jitter
+# Active batches with no progress for this long count as interrupted (process stopped).
+DRAFT_STALE_AFTER = CHALLENGE_DRAFT_TIMEOUT + 120
 
-# Each draft batch runs as its own task; the thread pool runs them in parallel.
-TASKS = {
-    'default': {
+# Each draft batch runs as its own task. Pick how tasks are executed with TASKS_MODE:
+#   threads  (default) in-process thread pool; nothing else to run, lost on restart.
+#   database durable queue in the database; run workers with `manage.py run_workers`.
+TASK_BACKENDS = {
+    'threads': {
         'BACKEND': 'army.task_backends.ThreadPoolBackend',
         'OPTIONS': {'MAX_WORKERS': 16},
     },
+    'database': {'BACKEND': 'django_tasks_db.DatabaseBackend'},
 }
+TASKS_MODE = os.environ.get('TASKS_MODE', 'threads')
+if TASKS_MODE not in TASK_BACKENDS:
+    raise ImproperlyConfigured(f"TASKS_MODE must be one of {sorted(TASK_BACKENDS)}, not {TASKS_MODE!r}")
+TASKS = {'default': TASK_BACKENDS[TASKS_MODE]}
 
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
     'formatters': {
-        'simple': {'format': '%(asctime)s %(levelname)s [%(threadName)s] %(name)s: %(message)s'},
+        'simple': {'format': '%(asctime)s %(levelname)s [%(process)d %(threadName)s] %(name)s: %(message)s'},
     },
     'handlers': {
         'console': {'class': 'logging.StreamHandler', 'formatter': 'simple'},

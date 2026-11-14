@@ -1,5 +1,6 @@
 import threading
 import time
+from datetime import timedelta
 from io import StringIO
 from unittest import mock
 
@@ -8,12 +9,13 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.tasks import TaskResultStatus, task
 from django.test import SimpleTestCase, TestCase, override_settings
+from django.utils import timezone
 
 from .api import ChallengeAPIError, get_json
 from .forms import DraftForm
 from .models import DraftBatch, Person
 from .task_backends import ThreadPoolBackend
-from .tasks import draft_all
+from .tasks import DraftingInProgress, mark_interrupted_batches, start_drafting
 
 # Run tasks synchronously in tests so results are deterministic.
 IMMEDIATE_TASKS = {"default": {"BACKEND": "django.tasks.backends.immediate.ImmediateBackend"}}
@@ -67,6 +69,12 @@ class GetJsonTests(TestCase):
             get_json("draft/0")
         self.assertTrue(ctx.exception.retryable)
 
+    @mock.patch("army.api.requests.get", return_value=fake_response("", status_code=499))
+    def test_gateway_499_is_retryable(self, _):
+        with self.assertRaises(ChallengeAPIError) as ctx:
+            get_json("draft/0")
+        self.assertTrue(ctx.exception.retryable)
+
     @mock.patch("army.api.requests.get", side_effect=requests.Timeout)
     def test_timeout_is_retryable(self, _):
         with self.assertRaises(ChallengeAPIError) as ctx:
@@ -88,7 +96,7 @@ class ImportAndDraftTests(TestCase):
     @mock.patch("army.api.requests.get", side_effect=fake_server(3))
     def test_draft_all_ranks_everyone_one_task_per_batch(self, _):
         call_command("import_people", stdout=StringIO())
-        draft_all.enqueue()
+        start_drafting()
         task_ids = set(DraftBatch.objects.values_list("task_id", flat=True))
         self.assertEqual(len(task_ids - {""}), 3)  # one separate task per batch
         self.assertEqual(Person.objects.filter(rank="Private", health=100).count(), 30)
@@ -97,14 +105,14 @@ class ImportAndDraftTests(TestCase):
 
     @mock.patch("army.api.requests.get", side_effect=fake_server(3))
     def test_follows_next_batch_when_estimate_is_too_low(self, _):
-        draft_all.enqueue()  # no people imported: estimate is 1 batch
+        start_drafting()  # no people imported: estimate is 1 batch
         self.assertEqual(DraftBatch.objects.filter(status="done").count(), 3)
         self.assertEqual(Person.objects.count(), 30)
 
     @mock.patch("army.tasks.time.sleep")
     @mock.patch("army.api.requests.get", side_effect=[requests.Timeout, fake_response(draft_payload(0, 0))])
     def test_retries_timeouts(self, *_):
-        draft_all.enqueue(batch_numbers=[0])
+        start_drafting([0])
         batch = DraftBatch.objects.get(number=0)
         self.assertEqual((batch.status, batch.attempts), ("done", 2))
 
@@ -115,6 +123,33 @@ class ImportAndDraftTests(TestCase):
         batch = DraftBatch.objects.get(number=5)
         self.assertEqual((batch.status, batch.attempts), ("failed", 1))
         self.assertIn("Invalid batch id", batch.error)
+
+
+    def test_refuses_to_start_while_batches_are_active(self):
+        DraftBatch.objects.create(number=0, status=DraftBatch.Status.RUNNING)
+        with self.assertRaises(DraftingInProgress):
+            start_drafting()
+        with self.assertRaises(DraftingInProgress):
+            start_drafting([0])
+
+    def test_stale_batches_are_marked_interrupted(self):
+        fresh = DraftBatch.objects.create(number=0, status=DraftBatch.Status.RUNNING)
+        stale = DraftBatch.objects.create(number=1, status=DraftBatch.Status.RUNNING)
+        DraftBatch.objects.filter(pk=stale.pk).update(updated_at=timezone.now() - timedelta(hours=1))
+        self.assertEqual(mark_interrupted_batches(), 1)
+        fresh.refresh_from_db()
+        stale.refresh_from_db()
+        self.assertEqual((fresh.status, stale.status), ("running", "failed"))
+        self.assertIn("Interrupted", stale.error)
+
+    def test_view_starts_drafting_and_rejects_double_submit(self):
+        with mock.patch("army.api.requests.get", side_effect=fake_server(1)):
+            response = self.client.post("/", {"batches": ""})
+        self.assertRedirects(response, "/")
+        self.assertEqual(DraftBatch.objects.get(number=0).status, "done")
+        DraftBatch.objects.filter(number=0).update(status=DraftBatch.Status.RUNNING)
+        response = self.client.post("/", {"batches": "0"})
+        self.assertContains(response, "still being drafted")
 
 
 PARALLEL = 3
