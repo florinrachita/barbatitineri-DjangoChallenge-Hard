@@ -26,6 +26,7 @@ Optional environment variables:
 python manage.py import_people   # Phase 1: register everyone from <host>/people
 python manage.py draft_people    # Phase 2: draft everyone via <host>/draft/<n>
 python manage.py runserver       # http://127.0.0.1:8000/ (overview + draft form)
+python manage.py test army      # offline tests (HTTP is mocked)
 ```
 
 `draft_people --batch 6 --batch 7` re-drafts only those batches. `--timeout` sets how many
